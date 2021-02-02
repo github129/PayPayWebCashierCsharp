@@ -84,7 +84,7 @@ namespace PayPayWebCashier
             return response;
         }
 
-        public virtual async Task<RefundResult> RefundPaymentAsync(string merchantRefundId, string paymentId, int amount, string reason, string nonce, string currency = "JPY")
+        public virtual async Task<RefundResult> RefundAsync(string merchantRefundId, string paymentId, int amount, string reason, string nonce, string currency = "JPY")
         {
             DateTimeOffset timestamp = DateTimeOffset.UtcNow;
             long epoc = timestamp.ToUnixTimeSeconds();
@@ -119,6 +119,29 @@ namespace PayPayWebCashier
             return response;
         }
 
+        public virtual async Task<DetailsResult> GetPaymentDetailsAsync(string merchantPaymentId, string nonce)
+        {
+            DateTimeOffset timestamp = DateTimeOffset.UtcNow;
+            long epoc = timestamp.ToUnixTimeSeconds();
+
+            string body = string.Empty;
+            string contentType = string.Empty;
+            string path = $"/v2/codes/payments/{merchantPaymentId}";
+            string method = "GET";
+
+            var headerAuthorizationObject = this.GetHeaderAuthorizationObject(body, contentType, path, method, nonce, epoc);
+            var authorization = new AuthenticationHeaderValue("hmac", headerAuthorizationObject);
+
+            var result = await this.GetAsync($"{this.Uri}{path}", authorization, this.MerchantId);
+
+            var responseContent = await result.Content.ReadAsStringAsync();
+            var response = JsonConvert.DeserializeObject<DetailsResult>(responseContent);
+
+            return response;
+        }
+
+
+
         /// <summary>
         /// SHA256(MD5)
         /// https://www.paypay.ne.jp/opa/doc/jp/v1.0/webcashier#section/Authentication
@@ -152,6 +175,16 @@ namespace PayPayWebCashier
             return response;
         }
 
+        protected async Task<HttpResponseMessage> GetAsync(string requestUri, AuthenticationHeaderValue authenticationHeaderValue, string merchantId)
+        {
+            _client.DefaultRequestHeaders.Authorization = authenticationHeaderValue;
+            _client.DefaultRequestHeaders.Add("X-ASSUME-MERCHANT", merchantId);
+
+            var response = await _client.GetAsync(requestUri).ConfigureAwait(false);
+
+            return response;
+        }
+
         /// <summary>
         /// SHA256(MD5)
         /// https://www.paypay.ne.jp/opa/doc/jp/v1.0/webcashier#section/Authentication
@@ -176,34 +209,42 @@ namespace PayPayWebCashier
 
         private string PayPayMD5(string body, string contentType)
         {
-            MD5CryptoServiceProvider md5 = new MD5CryptoServiceProvider();
-
-            try
+            if (string.IsNullOrEmpty(body))
             {
-                string value = $"{contentType}{body}";
-
-                // 第１HASH MD5
-                var byteBody = System.Text.Encoding.UTF8.GetBytes(body);
-                var byteContentType = System.Text.Encoding.UTF8.GetBytes(contentType);
-
-                var byteValue = byteBody.Concat(byteContentType).ToArray();
-
-
-                byte[] data = System.Text.Encoding.UTF8.GetBytes(value);
-                byte[] bs = md5.ComputeHash(data);
-                string result = Convert.ToBase64String(bs);
-
-                return result;
+                return string.Empty;
             }
-            catch
+            else
             {
-            }
-            finally
-            {
-                md5.Clear();
-            }
 
-            return string.Empty;
+                MD5CryptoServiceProvider md5 = new MD5CryptoServiceProvider();
+
+                try
+                {
+                    string value = $"{contentType}{body}";
+
+                    // 第１HASH MD5
+                    var byteBody = System.Text.Encoding.UTF8.GetBytes(body);
+                    var byteContentType = System.Text.Encoding.UTF8.GetBytes(contentType);
+
+                    var byteValue = byteBody.Concat(byteContentType).ToArray();
+
+
+                    byte[] data = System.Text.Encoding.UTF8.GetBytes(value);
+                    byte[] bs = md5.ComputeHash(data);
+                    string result = Convert.ToBase64String(bs);
+
+                    return result;
+                }
+                catch
+                {
+                }
+                finally
+                {
+                    md5.Clear();
+                }
+
+                return string.Empty;
+            }
         }
 
         /// <summary>
@@ -236,6 +277,15 @@ namespace PayPayWebCashier
         /// <returns></returns>
         private string Sha256Hash(string hash, byte[] apiSecret, string contentType, string path, string method, string nonce, string timestamp)
         {
+            if (string.IsNullOrEmpty(contentType) == true)
+            {
+                contentType = "empty";
+            }
+            if (string.IsNullOrEmpty(hash) == true)
+            {
+                hash = "empty";
+            }
+
             string value = $"{path}{DELIMITER}{method}{DELIMITER}{nonce}{DELIMITER}{timestamp}{DELIMITER}{contentType}{DELIMITER}{hash}";
 
             var secretHash = new HMACSHA256(apiSecret);
